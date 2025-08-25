@@ -340,7 +340,7 @@ unsafe impl<T: Trace, S: Trace> Trace for HashSet<T, S> {
 impl<T> Finalize for LinkedList<T> {}
 unsafe impl<T: Trace> Trace for LinkedList<T> {
     custom_trace!(this, {
-        for v in this.iter() {
+        for v in this {
             mark(v);
         }
     });
