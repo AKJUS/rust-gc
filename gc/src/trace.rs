@@ -340,7 +340,7 @@ unsafe impl<T: Trace, S: Trace> Trace for HashSet<T, S> {
 impl<T> Finalize for LinkedList<T> {}
 unsafe impl<T: Trace> Trace for LinkedList<T> {
     custom_trace!(this, {
-        for v in this.iter() {
+        for v in this {
             mark(v);
         }
     });
@@ -360,8 +360,8 @@ unsafe impl<T: Trace> Trace for VecDeque<T> {
     });
 }
 
-impl<'a, T: ToOwned + ?Sized> Finalize for Cow<'a, T>{}
-unsafe impl<'a, T: ToOwned + ?Sized> Trace for Cow<'a, T>
+impl<T: ToOwned + ?Sized> Finalize for Cow<'_, T> {}
+unsafe impl<T: ToOwned + ?Sized> Trace for Cow<'_, T>
 where
     T::Owned: Trace,
 {
