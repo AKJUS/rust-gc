@@ -222,7 +222,7 @@ impl<T: ?Sized> GcBox<T> {
     pub(crate) fn ptr_eq(this: &GcBox<T>, other: &GcBox<T>) -> bool {
         // Use .header to ignore fat pointer vtables, to work around
         // https://github.com/rust-lang/rust/issues/46139
-        ptr::eq(&this.header, &other.header)
+        ptr::eq(&raw const this.header, &raw const other.header)
     }
 }
 
