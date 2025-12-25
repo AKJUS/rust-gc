@@ -2,7 +2,7 @@ use gc::{Finalize, Trace};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-thread_local!(static X: RefCell<u8> = RefCell::new(0));
+thread_local!(static X: RefCell<u8> = const { RefCell::new(0) });
 
 #[derive(Copy, Clone, Finalize)]
 struct Foo;
@@ -59,20 +59,16 @@ fn test() {
         InnerRcStr {
             inner: "abc".into(),
         }
-        .trace();
-    }
+        .trace()
+    };
 
     let bar = Bar { inner: Foo };
-    unsafe {
-        bar.trace();
-    }
+    unsafe { bar.trace() };
     X.with(|x| assert!(*x.borrow() == 1));
     let baz = Baz {
         a: bar.clone(),
         b: bar,
     };
-    unsafe {
-        baz.trace();
-    }
+    unsafe { baz.trace() };
     X.with(|x| assert!(*x.borrow() == 3));
 }
