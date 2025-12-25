@@ -1,37 +1,33 @@
-#![feature(test)]
-
-extern crate test;
+use criterion::{criterion_group, criterion_main, Criterion};
 
 const THING: u64 = 0;
 
-fn discard(b: &mut test::Bencher, n: usize) {
-    b.iter(|| {
-        gc::force_collect();
-        for _ in 0..n {
-            test::black_box(gc::Gc::new(THING));
-        }
-    });
-}
-fn keep(b: &mut test::Bencher, n: usize) {
-    b.iter(|| {
-        gc::force_collect();
-        (0..n).map(|_| gc::Gc::new(THING)).collect::<Vec<_>>()
+fn discard(c: &mut Criterion, n: usize) {
+    c.bench_function(&format!("discard_{}", n), |b| {
+        b.iter(|| {
+            gc::force_collect();
+            for _ in 0..n {
+                std::hint::black_box(gc::Gc::new(THING));
+            }
+        })
     });
 }
 
-#[bench]
-fn discard_100(b: &mut test::Bencher) {
-    discard(b, 100);
+fn keep(c: &mut Criterion, n: usize) {
+    c.bench_function(&format!("keep_{}", n), |b| {
+        b.iter(|| {
+            gc::force_collect();
+            (0..n).map(|_| gc::Gc::new(THING)).collect::<Vec<_>>()
+        })
+    });
 }
-#[bench]
-fn keep_100(b: &mut test::Bencher) {
-    keep(b, 100);
+
+fn benches(c: &mut Criterion) {
+    discard(c, 100);
+    keep(c, 100);
+    discard(c, 10_000);
+    keep(c, 10_000);
 }
-#[bench]
-fn discard_10000(b: &mut test::Bencher) {
-    discard(b, 10_000);
-}
-#[bench]
-fn keep_10000(b: &mut test::Bencher) {
-    keep(b, 10_000);
-}
+
+criterion_group!(benches_group, benches);
+criterion_main!(benches_group);
