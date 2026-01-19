@@ -91,17 +91,19 @@ impl<T: Trace + ?Sized> Gc<T> {
     /// `GcBox` chain.
     #[inline]
     unsafe fn from_gcbox(ptr: NonNull<GcBox<T>>) -> Gc<T> {
-        assert!(mem::align_of_val::<GcBox<T>>(unsafe { ptr.as_ref() }) > 1);
+        unsafe {
+            assert!(mem::align_of_val::<GcBox<T>>(ptr.as_ref()) > 1);
 
-        // When we create a Gc<T>, all pointers which have been moved to the
-        // heap no longer need to be rooted, so we unroot them.
-        unsafe { ptr.as_ref().value().unroot() };
-        let gc = Gc {
-            ptr_root: Cell::new(ptr),
-            marker: PhantomData,
-        };
-        unsafe { gc.set_root() };
-        gc
+            // When we create a Gc<T>, all pointers which have been moved to the
+            // heap no longer need to be rooted, so we unroot them.
+            ptr.as_ref().value().unroot();
+            let gc = Gc {
+                ptr_root: Cell::new(ptr),
+                marker: PhantomData,
+            };
+            gc.set_root();
+            gc
+        }
     }
 }
 
@@ -135,8 +137,10 @@ unsafe fn clear_root_bit<T: ?Sized>(ptr: NonNull<GcBox<T>>) -> NonNull<GcBox<T>>
     let ptr = ptr.as_ptr();
     let data = ptr.cast::<u8>();
     let addr = data as isize;
-    let ptr = unsafe { set_data_ptr(ptr, data.wrapping_offset((addr & !1) - addr)) };
-    unsafe { NonNull::new_unchecked(ptr) }
+    unsafe {
+        let ptr = set_data_ptr(ptr, data.wrapping_offset((addr & !1) - addr));
+        NonNull::new_unchecked(ptr)
+    }
 }
 
 impl<T: ?Sized> Gc<T> {
@@ -148,8 +152,10 @@ impl<T: ?Sized> Gc<T> {
         let ptr = self.ptr_root.get().as_ptr();
         let data = ptr.cast::<u8>();
         let addr = data as isize;
-        let ptr = unsafe { set_data_ptr(ptr, data.wrapping_offset((addr | 1) - addr)) };
-        self.ptr_root.set(unsafe { NonNull::new_unchecked(ptr) });
+        unsafe {
+            let ptr = set_data_ptr(ptr, data.wrapping_offset((addr | 1) - addr));
+            self.ptr_root.set(NonNull::new_unchecked(ptr));
+        }
     }
 
     unsafe fn clear_root(&self) {
@@ -231,22 +237,24 @@ impl<T: ?Sized> Gc<T> {
     /// # Safety
     ///
     pub unsafe fn from_raw(ptr: *const T) -> Self {
-        // Find the offset of T in GcBox<T>. Note that Layout::extend
-        // relies on GcBox being repr(C).
-        let (_, offset) = Layout::new::<GcBoxHeader>()
-            .extend(Layout::for_value::<T>(unsafe { &*ptr }))
-            .unwrap();
+        unsafe {
+            // Find the offset of T in GcBox<T>. Note that Layout::extend
+            // relies on GcBox being repr(C).
+            let (_, offset) = Layout::new::<GcBoxHeader>()
+                .extend(Layout::for_value::<T>(&*ptr))
+                .unwrap();
 
-        // Reverse the offset to find the original GcBox.
-        let fake_ptr = ptr as *mut GcBox<T>;
-        let rc_ptr = unsafe { set_data_ptr(fake_ptr, (ptr as *mut u8).offset(-(offset as isize))) };
+            // Reverse the offset to find the original GcBox.
+            let fake_ptr = ptr as *mut GcBox<T>;
+            let rc_ptr = set_data_ptr(fake_ptr, (ptr as *mut u8).offset(-(offset as isize)));
 
-        let gc = Gc {
-            ptr_root: Cell::new(unsafe { NonNull::new_unchecked(rc_ptr) }),
-            marker: PhantomData,
-        };
-        unsafe { gc.set_root() };
-        gc
+            let gc = Gc {
+                ptr_root: Cell::new(NonNull::new_unchecked(rc_ptr)),
+                marker: PhantomData,
+            };
+            gc.set_root();
+            gc
+        }
     }
 }
 
@@ -262,24 +270,28 @@ unsafe impl<T: Trace + ?Sized> Trace for Gc<T> {
     unsafe fn root(&self) {
         assert!(!self.rooted(), "Can't double-root a Gc<T>");
 
-        // Try to get inner before modifying our state. Inner may be
-        // inaccessible due to this method being invoked during the sweeping
-        // phase, and we don't want to modify our state before panicking.
-        unsafe { self.inner().root_inner() };
+        unsafe {
+            // Try to get inner before modifying our state. Inner may be
+            // inaccessible due to this method being invoked during the sweeping
+            // phase, and we don't want to modify our state before panicking.
+            self.inner().root_inner();
 
-        unsafe { self.set_root() };
+            self.set_root()
+        };
     }
 
     #[inline]
     unsafe fn unroot(&self) {
         assert!(self.rooted(), "Can't double-unroot a Gc<T>");
 
-        // Try to get inner before modifying our state. Inner may be
-        // inaccessible due to this method being invoked during the sweeping
-        // phase, and we don't want to modify our state before panicking.
-        unsafe { self.inner().unroot_inner() };
+        unsafe {
+            // Try to get inner before modifying our state. Inner may be
+            // inaccessible due to this method being invoked during the sweeping
+            // phase, and we don't want to modify our state before panicking.
+            self.inner().unroot_inner();
 
-        unsafe { self.clear_root() };
+            self.clear_root()
+        };
     }
 
     #[inline]

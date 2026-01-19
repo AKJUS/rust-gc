@@ -270,11 +270,12 @@ fn collect_garbage(st: &mut GcState) {
         // Walk the tree, tracing and marking the nodes
         let mut mark_head = head.get();
         while let Some(node) = mark_head {
-            if unsafe { node.as_ref().header.roots() } > 0 {
-                unsafe { node.as_ref().trace_inner() };
+            unsafe {
+                if node.as_ref().header.roots() > 0 {
+                    node.as_ref().trace_inner();
+                }
+                mark_head = node.as_ref().header.next.get();
             }
-
-            mark_head = unsafe { node.as_ref().header.next.get() };
         }
 
         // Collect a vector of all of the nodes which were not marked,
@@ -282,15 +283,17 @@ fn collect_garbage(st: &mut GcState) {
         let mut unmarked = Vec::new();
         let mut unmark_head = head;
         while let Some(node) = unmark_head.get() {
-            if unsafe { node.as_ref().header.is_marked() } {
-                unsafe { node.as_ref().header.unmark() };
-            } else {
-                unmarked.push(Unmarked {
-                    incoming: unmark_head,
-                    this: node,
-                });
+            unsafe {
+                if node.as_ref().header.is_marked() {
+                    node.as_ref().header.unmark();
+                } else {
+                    unmarked.push(Unmarked {
+                        incoming: unmark_head,
+                        this: node,
+                    });
+                }
+                unmark_head = &node.as_ref().header.next;
             }
-            unmark_head = unsafe { &node.as_ref().header.next };
         }
         unmarked
     }
