@@ -40,9 +40,9 @@ pub use crate::gc::{finalizer_safe, force_collect};
 pub use crate::trace::{Finalize, Trace};
 
 #[cfg(feature = "unstable-config")]
-pub use crate::gc::{configure, GcConfig};
+pub use crate::gc::{GcConfig, configure};
 #[cfg(feature = "unstable-stats")]
-pub use crate::gc::{stats, GcStats};
+pub use crate::gc::{GcStats, stats};
 
 ////////
 // Gc //
@@ -91,17 +91,19 @@ impl<T: Trace + ?Sized> Gc<T> {
     /// `GcBox` chain.
     #[inline]
     unsafe fn from_gcbox(ptr: NonNull<GcBox<T>>) -> Gc<T> {
-        assert!(mem::align_of_val::<GcBox<T>>(ptr.as_ref()) > 1);
+        unsafe {
+            assert!(mem::align_of_val::<GcBox<T>>(ptr.as_ref()) > 1);
 
-        // When we create a Gc<T>, all pointers which have been moved to the
-        // heap no longer need to be rooted, so we unroot them.
-        ptr.as_ref().value().unroot();
-        let gc = Gc {
-            ptr_root: Cell::new(ptr),
-            marker: PhantomData,
-        };
-        gc.set_root();
-        gc
+            // When we create a Gc<T>, all pointers which have been moved to the
+            // heap no longer need to be rooted, so we unroot them.
+            ptr.as_ref().value().unroot();
+            let gc = Gc {
+                ptr_root: Cell::new(ptr),
+                marker: PhantomData,
+            };
+            gc.set_root();
+            gc
+        }
     }
 }
 
@@ -135,8 +137,10 @@ unsafe fn clear_root_bit<T: ?Sized>(ptr: NonNull<GcBox<T>>) -> NonNull<GcBox<T>>
     let ptr = ptr.as_ptr();
     let data = ptr.cast::<u8>();
     let addr = data as isize;
-    let ptr = set_data_ptr(ptr, data.wrapping_offset((addr & !1) - addr));
-    NonNull::new_unchecked(ptr)
+    unsafe {
+        let ptr = set_data_ptr(ptr, data.wrapping_offset((addr & !1) - addr));
+        NonNull::new_unchecked(ptr)
+    }
 }
 
 impl<T: ?Sized> Gc<T> {
@@ -148,12 +152,14 @@ impl<T: ?Sized> Gc<T> {
         let ptr = self.ptr_root.get().as_ptr();
         let data = ptr.cast::<u8>();
         let addr = data as isize;
-        let ptr = set_data_ptr(ptr, data.wrapping_offset((addr | 1) - addr));
-        self.ptr_root.set(NonNull::new_unchecked(ptr));
+        unsafe {
+            let ptr = set_data_ptr(ptr, data.wrapping_offset((addr | 1) - addr));
+            self.ptr_root.set(NonNull::new_unchecked(ptr));
+        }
     }
 
     unsafe fn clear_root(&self) {
-        self.ptr_root.set(clear_root_bit(self.ptr_root.get()));
+        unsafe { self.ptr_root.set(clear_root_bit(self.ptr_root.get())) };
     }
 
     #[inline]
@@ -227,23 +233,28 @@ impl<T: ?Sized> Gc<T> {
     /// // The memory can be freed at any time after `x` went out of scope above
     /// // (when the collector is run), which would result in `x_ptr` dangling!
     /// ```
+    ///
+    /// # Safety
+    ///
     pub unsafe fn from_raw(ptr: *const T) -> Self {
-        // Find the offset of T in GcBox<T>. Note that Layout::extend
-        // relies on GcBox being repr(C).
-        let (_, offset) = Layout::new::<GcBoxHeader>()
-            .extend(Layout::for_value::<T>(&*ptr))
-            .unwrap();
+        unsafe {
+            // Find the offset of T in GcBox<T>. Note that Layout::extend
+            // relies on GcBox being repr(C).
+            let (_, offset) = Layout::new::<GcBoxHeader>()
+                .extend(Layout::for_value::<T>(&*ptr))
+                .unwrap();
 
-        // Reverse the offset to find the original GcBox.
-        let fake_ptr = ptr as *mut GcBox<T>;
-        let rc_ptr = set_data_ptr(fake_ptr, (ptr as *mut u8).offset(-(offset as isize)));
+            // Reverse the offset to find the original GcBox.
+            let fake_ptr = ptr as *mut GcBox<T>;
+            let rc_ptr = set_data_ptr(fake_ptr, (ptr as *mut u8).offset(-(offset as isize)));
 
-        let gc = Gc {
-            ptr_root: Cell::new(NonNull::new_unchecked(rc_ptr)),
-            marker: PhantomData,
-        };
-        gc.set_root();
-        gc
+            let gc = Gc {
+                ptr_root: Cell::new(NonNull::new_unchecked(rc_ptr)),
+                marker: PhantomData,
+            };
+            gc.set_root();
+            gc
+        }
     }
 }
 
@@ -252,31 +263,35 @@ impl<T: ?Sized> Finalize for Gc<T> {}
 unsafe impl<T: Trace + ?Sized> Trace for Gc<T> {
     #[inline]
     unsafe fn trace(&self) {
-        self.inner().trace_inner();
+        unsafe { self.inner().trace_inner() };
     }
 
     #[inline]
     unsafe fn root(&self) {
         assert!(!self.rooted(), "Can't double-root a Gc<T>");
 
-        // Try to get inner before modifying our state. Inner may be
-        // inaccessible due to this method being invoked during the sweeping
-        // phase, and we don't want to modify our state before panicking.
-        self.inner().root_inner();
+        unsafe {
+            // Try to get inner before modifying our state. Inner may be
+            // inaccessible due to this method being invoked during the sweeping
+            // phase, and we don't want to modify our state before panicking.
+            self.inner().root_inner();
 
-        self.set_root();
+            self.set_root()
+        };
     }
 
     #[inline]
     unsafe fn unroot(&self) {
         assert!(self.rooted(), "Can't double-unroot a Gc<T>");
 
-        // Try to get inner before modifying our state. Inner may be
-        // inaccessible due to this method being invoked during the sweeping
-        // phase, and we don't want to modify our state before panicking.
-        self.inner().unroot_inner();
+        unsafe {
+            // Try to get inner before modifying our state. Inner may be
+            // inaccessible due to this method being invoked during the sweeping
+            // phase, and we don't want to modify our state before panicking.
+            self.inner().unroot_inner();
 
-        self.clear_root();
+            self.clear_root()
+        };
     }
 
     #[inline]
@@ -288,15 +303,13 @@ unsafe impl<T: Trace + ?Sized> Trace for Gc<T> {
 impl<T: ?Sized> Clone for Gc<T> {
     #[inline]
     fn clone(&self) -> Self {
-        unsafe {
-            self.inner().root_inner();
-            let gc = Gc {
-                ptr_root: Cell::new(self.ptr_root.get()),
-                marker: PhantomData,
-            };
-            gc.set_root();
-            gc
-        }
+        unsafe { self.inner().root_inner() };
+        let gc = Gc {
+            ptr_root: Cell::new(self.ptr_root.get()),
+            marker: PhantomData,
+        };
+        unsafe { gc.set_root() };
+        gc
     }
 }
 
@@ -314,9 +327,7 @@ impl<T: ?Sized> Drop for Gc<T> {
     fn drop(&mut self) {
         // If this pointer was a root, we should unroot it.
         if self.rooted() {
-            unsafe {
-                self.inner().unroot_inner();
-            }
+            unsafe { self.inner().unroot_inner() };
         }
     }
 }
@@ -402,9 +413,9 @@ impl<T: Trace> From<T> for Gc<T> {
 }
 
 impl<
-        #[cfg(not(feature = "nightly"))] T: Trace,
-        #[cfg(feature = "nightly")] T: Trace + Unsize<dyn Trace> + ?Sized,
-    > From<Box<T>> for Gc<T>
+    #[cfg(not(feature = "nightly"))] T: Trace,
+    #[cfg(feature = "nightly")] T: Trace + Unsize<dyn Trace> + ?Sized,
+> From<Box<T>> for Gc<T>
 {
     /// Moves a boxed value into a new garbage-collected
     /// allocation. If the `nightly` crate feature is enabled, the
@@ -641,18 +652,16 @@ impl<T: Trace + ?Sized> GcCell<T> {
         }
         self.flags.set(self.flags.get().set_writing());
 
-        unsafe {
-            // Force the val_ref's contents to be rooted for the duration of the
-            // mutable borrow
-            if !self.flags.get().rooted() {
-                (*self.cell.get()).root();
-            }
-
-            Ok(GcCellRefMut {
-                gc_cell: self,
-                value: &mut *self.cell.get(),
-            })
+        // Force the val_ref's contents to be rooted for the duration of the
+        // mutable borrow
+        if !self.flags.get().rooted() {
+            unsafe { (*self.cell.get()).root() };
         }
+
+        Ok(GcCellRefMut {
+            gc_cell: self,
+            value: unsafe { &mut *self.cell.get() },
+        })
     }
 }
 
@@ -683,7 +692,7 @@ unsafe impl<T: Trace + ?Sized> Trace for GcCell<T> {
     unsafe fn trace(&self) {
         match self.flags.get().borrowed() {
             BorrowState::Writing => (),
-            _ => (*self.cell.get()).trace(),
+            _ => unsafe { (*self.cell.get()).trace() },
         }
     }
 
@@ -694,7 +703,7 @@ unsafe impl<T: Trace + ?Sized> Trace for GcCell<T> {
 
         match self.flags.get().borrowed() {
             BorrowState::Writing => (),
-            _ => (*self.cell.get()).root(),
+            _ => unsafe { (*self.cell.get()).root() },
         }
     }
 
@@ -705,7 +714,7 @@ unsafe impl<T: Trace + ?Sized> Trace for GcCell<T> {
 
         match self.flags.get().borrowed() {
             BorrowState::Writing => (),
-            _ => (*self.cell.get()).unroot(),
+            _ => unsafe { (*self.cell.get()).unroot() },
         }
     }
 
@@ -1020,9 +1029,7 @@ impl<T: Trace + ?Sized, U: ?Sized> Drop for GcCellRefMut<'_, T, U> {
         // Restore the rooted state of the GcCell's contents to the state of the GcCell.
         // During the lifetime of the GcCellRefMut, the GcCell's contents are rooted.
         if !self.gc_cell.flags.get().rooted() {
-            unsafe {
-                (*self.gc_cell.cell.get()).unroot();
-            }
+            unsafe { (*self.gc_cell.cell.get()).unroot() };
         }
         self.gc_cell
             .flags
@@ -1121,8 +1128,10 @@ impl<T: ?Sized + Debug> Debug for GcCell<T> {
 // For a slice/trait object, this sets the `data` field and leaves the rest
 // unchanged. For a sized raw pointer, this simply sets the pointer.
 unsafe fn set_data_ptr<T: ?Sized, U>(mut ptr: *mut T, data: *mut U) -> *mut T {
-    ptr::addr_of_mut!(ptr)
-        .cast::<*mut u8>()
-        .write(data.cast::<u8>());
+    unsafe {
+        ptr::addr_of_mut!(ptr)
+            .cast::<*mut u8>()
+            .write(data.cast::<u8>())
+    };
     ptr
 }

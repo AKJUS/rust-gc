@@ -1,3 +1,7 @@
+/.vs
+/.vscode
+/.VSCodeCounter
+
 # Compiled files
 *.o
 *.so
